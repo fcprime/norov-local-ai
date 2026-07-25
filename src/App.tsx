@@ -674,7 +674,7 @@ export default function App({ userId, profile, onSignOut }: { userId: string; pr
   });
   const [isSearching, setIsSearching] = useState(false);
   const [hasSearched, setHasSearched] = useState(Boolean(savedSearchState?.hasSearched));
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(savedSearchState?.selectedId ?? null);
   const [channel, setChannel] = useState<Channel>('Email');
   const viewStateKey = `norov-local-ai-active-view:${userId}`;
   const [view, setView] = useState<'search' | 'crm' | 'constructor' | 'guide' | 'admin'>(() => {
@@ -749,6 +749,7 @@ export default function App({ userId, profile, onSignOut }: { userId: string; pr
       if (state?.search) {
         if (state.search.filters) setFilters(state.search.filters);
         if (typeof state.search.hasSearched === 'boolean') setHasSearched(state.search.hasSearched);
+        if ('selectedId' in state.search) setSelectedId(state.search.selectedId ?? null);
         if ('lastSearchIds' in state.search) setLastSearchIds(state.search.lastSearchIds ?? null);
         if (state.search.searchSource) setSearchSource(state.search.searchSource);
         if ('usage' in state.search) setUsage(state.search.usage ?? null);
@@ -763,14 +764,14 @@ export default function App({ userId, profile, onSignOut }: { userId: string; pr
     localStorage.setItem('norov-local-ai-companies', JSON.stringify(companies));
     localStorage.setItem('norov-local-ai-crm-ids', JSON.stringify(crmIds));
     localStorage.setItem('norov-local-ai-message-drafts', JSON.stringify(messageDrafts));
-    const search = { filters, hasSearched, lastSearchIds, searchSource, usage };
+    const search = { filters, hasSearched, selectedId, lastSearchIds, searchSource, usage };
     localStorage.setItem(searchStateKey, JSON.stringify(search));
     if (!cloudReady) return;
     const timer = window.setTimeout(() => {
       supabase.from('user_state').upsert({ user_id: userId, state: { companies, crmIds, messageDrafts, search }, updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
     }, 700);
     return () => window.clearTimeout(timer);
-  }, [companies, crmIds, messageDrafts, filters, hasSearched, lastSearchIds, searchSource, usage, cloudReady, userId, searchStateKey]);
+  }, [companies, crmIds, messageDrafts, filters, hasSearched, selectedId, lastSearchIds, searchSource, usage, cloudReady, userId, searchStateKey]);
 
   useEffect(() => {
     localStorage.setItem(viewStateKey, view);
@@ -793,6 +794,11 @@ export default function App({ userId, profile, onSignOut }: { userId: string; pr
   }, [constructorGenerated, outreachPack, constructorSource]);
 
   const selected = companies.find((company) => company.id === selectedId) ?? null;
+
+  useEffect(() => {
+    if (!selectedId || lastSearchIds === null) return;
+    if (!lastSearchIds.includes(selectedId)) setSelectedId(null);
+  }, [selectedId, lastSearchIds]);
 
   const visibleCompanies = useMemo(() => {
     if (!hasSearched) return [];
@@ -817,11 +823,12 @@ export default function App({ userId, profile, onSignOut }: { userId: string; pr
 
   function selectCompany(id: string) {
     setSelectedId(id);
-    if (window.matchMedia('(max-width: 1100px)').matches) {
-      window.requestAnimationFrame(() => {
+    window.requestAnimationFrame(() => {
+      if (detailPanelRef.current) detailPanelRef.current.scrollTop = 0;
+      if (window.matchMedia('(max-width: 1100px)').matches) {
         detailPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      });
-    }
+      }
+    });
   }
 
   function resetSearch() {
@@ -1494,9 +1501,10 @@ export default function App({ userId, profile, onSignOut }: { userId: string; pr
                           </div>
                         </div>
                         <div className="contact-grid">
-                          <span>{selected.email}</span>
-                          <span>{selected.phone}</span>
-                          <span>{selected.address}</span>
+                          {selected.email && <a href={`mailto:${selected.email}`}>{selected.email}</a>}
+                          {selected.phone && <a href={`tel:${selected.phone.replace(/\s+/g, '')}`}>{selected.phone}</a>}
+                          {selected.address && <span>{selected.address}</span>}
+                          {!selected.email && !selected.phone && !selected.address && <span>Відкриті контактні дані не знайдено.</span>}
                         </div>
                         <div className="insight">
                           <strong>Чому варто контактувати</strong>

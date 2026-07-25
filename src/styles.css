@@ -380,3 +380,6 @@ select:invalid{color:#667085}
   .constructor-template{order:2}
   .constructor-ai{order:1;min-height:50px}
 }
+
+.contact-grid a{color:#475467;text-decoration:none;overflow-wrap:anywhere}
+.contact-grid a:hover{color:#5d4de0;text-decoration:underline}

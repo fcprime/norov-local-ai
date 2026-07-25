@@ -210,20 +210,63 @@ function canonicalWebsite(value = '') {
 }
 
 function mergeCompanies(primary, fallback) {
-  const merged = [...primary]
-  const phones = new Set(primary.map((c) => normalize(c.phone)).filter(Boolean))
-  const websites = new Set(primary.map((c) => canonicalWebsite(c.website)).filter(Boolean))
-  const names = new Set(primary.map((c) => normalize(c.name)))
-  for (const company of fallback) {
+  const merged = primary.map((company) => ({ ...company }))
+
+  function findDuplicateIndex(company) {
     const phone = normalize(company.phone)
     const website = canonicalWebsite(company.website)
     const name = normalize(company.name)
-    if ((phone && phones.has(phone)) || (website && websites.has(website)) || names.has(name)) continue
-    merged.push(company)
-    if (phone) phones.add(phone)
-    if (website) websites.add(website)
-    if (name) names.add(name)
+    return merged.findIndex((item) => {
+      const samePhone = phone && normalize(item.phone) === phone
+      const sameWebsite = website && canonicalWebsite(item.website) === website
+      const sameName = name && normalize(item.name) === name
+      return Boolean(samePhone || sameWebsite || sameName)
+    })
   }
+
+  function enrichCompany(base, extra) {
+    const enriched = {
+      ...base,
+      website: base.website || extra.website || '',
+      email: base.email || extra.email || '',
+      phone: base.phone || extra.phone || '',
+      facebook: base.facebook || extra.facebook || '',
+      instagram: base.instagram || extra.instagram || '',
+      googleMapsUrl: base.googleMapsUrl || extra.googleMapsUrl || '',
+      address: base.address || extra.address || '',
+      city: base.city || extra.city || '',
+      category: base.category || extra.category || '',
+      rating: base.rating || extra.rating || 0,
+      reviews: base.reviews || extra.reviews || 0,
+      placeId: base.placeId || extra.placeId || '',
+    }
+
+    const contacts = [
+      enriched.website && 'сайт',
+      enriched.phone && 'телефон',
+      enriched.email && 'email',
+      enriched.facebook && 'Facebook',
+      enriched.instagram && 'Instagram',
+    ].filter(Boolean)
+
+    enriched.reason = `${enriched.name} — це ${(enriched.localizedTargetBusiness || enriched.category || 'локальний бізнес').toLowerCase()} у вибраному місті або радіусі. ${
+      contacts.length
+        ? `Є відкриті контакти: ${contacts.join(', ')}.`
+        : 'Контакти можна уточнити через сайт, Google Maps або інші відкриті джерела.'
+    }`
+
+    return enriched
+  }
+
+  for (const company of fallback) {
+    const duplicateIndex = findDuplicateIndex(company)
+    if (duplicateIndex >= 0) {
+      merged[duplicateIndex] = enrichCompany(merged[duplicateIndex], company)
+    } else {
+      merged.push(company)
+    }
+  }
+
   return merged
 }
 
