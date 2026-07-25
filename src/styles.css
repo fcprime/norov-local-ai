@@ -431,3 +431,48 @@ select:invalid{color:#667085}
     overflow: visible;
   }
 }
+
+
+/* Stable desktop split view: both columns stay visible and scroll independently */
+@media (min-width: 1101px) {
+  .workspace {
+    position: sticky;
+    top: 18px;
+    height: calc(100vh - 36px);
+    min-height: 560px;
+    overflow: hidden;
+    align-items: stretch;
+  }
+
+  .lead-list,
+  .detail-panel {
+    height: 100%;
+    min-height: 0;
+    max-height: none;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
+
+  .detail-panel {
+    position: static;
+    top: auto;
+    align-self: stretch;
+  }
+}
+
+@media (max-width: 1100px) {
+  .workspace {
+    position: static;
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+  }
+
+  .lead-list,
+  .detail-panel {
+    height: auto;
+    max-height: none;
+    overflow: visible;
+  }
+}
