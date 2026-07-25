@@ -1,4 +1,4 @@
-import { json, requireUser } from './_supabase.mjs'
+import { getProfile, json, requireUser } from './_supabase.mjs'
 
 const OPENAI_API_KEY = String(process.env.OPENAI_API_KEY || '').trim()
 const OPENAI_MODEL = String(process.env.OPENAI_MODEL || 'gpt-5.4-mini').trim()
@@ -10,7 +10,19 @@ function parseJsonText(text) { return JSON.parse(String(text || '').trim().repla
 export default async function handler(request) {
   if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405)
   try {
-    await requireUser(request)
+    const user = await requireUser(request)
+    const profile = await getProfile(user.id)
+    if (!profile) return json({ error: 'Профіль користувача не знайдено.' }, 403)
+    if (profile.role !== 'admin' && profile.status !== 'active') {
+      return json({ error: 'Ваш акаунт не має активного доступу.' }, 403)
+    }
+    if (
+      profile.role !== 'admin' &&
+      profile.access_expires_at &&
+      new Date(profile.access_expires_at).getTime() < Date.now()
+    ) {
+      return json({ error: 'Термін доступу завершився.' }, 403)
+    }
     if (!OPENAI_API_KEY) return json({ error: 'OPENAI_API_KEY не налаштований у Netlify.' }, 503)
     const body = await request.json().catch(() => ({}))
     const form = { service: clean(body.service,300), audience: clean(body.audience,300), problem: clean(body.problem), result: clean(body.result,500), offer: clean(body.offer,500), cta: clean(body.cta,400), proof: clean(body.proof,500), language: ['uk','pl','en'].includes(body.language)?body.language:'uk', tone: ['friendly','direct','expert','soft'].includes(body.tone)?body.tone:'friendly' }

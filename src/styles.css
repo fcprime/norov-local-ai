@@ -403,3 +403,31 @@ select:invalid{color:#667085}
   .detail-panel{position:static;top:auto}
   .load-more-button{width:100%}
 }
+
+
+/* Single-page scrolling: remove the nested scrollbar from the desktop detail panel */
+@media (min-width: 1101px) {
+  .workspace {
+    overflow: visible;
+    align-items: start;
+  }
+
+  .detail-panel {
+    position: sticky;
+    top: 18px;
+    max-height: none;
+    overflow: visible;
+    overscroll-behavior: auto;
+    scrollbar-gutter: auto;
+    align-self: start;
+  }
+}
+
+@media (max-width: 1100px) {
+  .detail-panel {
+    position: static;
+    top: auto;
+    max-height: none;
+    overflow: visible;
+  }
+}

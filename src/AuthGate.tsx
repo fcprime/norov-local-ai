@@ -4,11 +4,10 @@ import type { Session } from '@supabase/supabase-js'
 import App from './App'
 import { supabase, supabaseConfigured, type Profile } from './supabase'
 
-type AuthMode = 'login' | 'register' | 'forgot' | 'recovery'
+type AuthMode = 'login' | 'forgot' | 'recovery'
 
 function LoginScreen({ initialMode = 'login', onRecoveryComplete }: { initialMode?: AuthMode; onRecoveryComplete?: () => void }) {
   const [mode, setMode] = useState<AuthMode>(initialMode)
-  const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -31,28 +30,7 @@ function LoginScreen({ initialMode = 'login', onRecoveryComplete }: { initialMod
     setMessage('')
 
     try {
-      if (mode === 'register') {
-        if (!fullName.trim()) throw new Error('Вкажіть ваше ім’я.')
-        if (password.length < 8) throw new Error('Пароль має містити щонайменше 8 символів.')
-        if (password !== confirmPassword) throw new Error('Паролі не збігаються.')
-
-        const { data, error: authError } = await supabase.auth.signUp({
-          email: email.trim(),
-          password,
-          options: {
-            emailRedirectTo: window.location.origin,
-            data: { full_name: fullName.trim() },
-          },
-        })
-        if (authError) throw authError
-
-        if (data.session) {
-          setMessage('Акаунт створено. Доступ очікує активації адміністратором.')
-        } else {
-          setMessage('Реєстрацію завершено. Перевірте пошту та підтвердьте email, після чого увійдіть.')
-          setMode('login')
-        }
-      } else if (mode === 'forgot') {
+      if (mode === 'forgot') {
         const { error: authError } = await supabase.auth.resetPasswordForEmail(email.trim(), {
           redirectTo: window.location.origin,
         })
@@ -81,21 +59,17 @@ function LoginScreen({ initialMode = 'login', onRecoveryComplete }: { initialMod
     }
   }
 
-  const title = mode === 'register'
-    ? 'Створіть акаунт'
-    : mode === 'forgot'
-      ? 'Відновлення пароля'
-      : mode === 'recovery'
-        ? 'Створіть новий пароль'
-        : 'Увійдіть у Norov Local AI'
+  const title = mode === 'forgot'
+    ? 'Відновлення пароля'
+    : mode === 'recovery'
+      ? 'Створіть новий пароль'
+      : 'Увійдіть у Norov Local AI'
 
-  const copy = mode === 'register'
-    ? 'Зареєструйтеся через будь-яку email-адресу. Нові акаунти активуються адміністратором.'
-    : mode === 'forgot'
-      ? 'Вкажіть email, який використовували під час реєстрації.'
-      : mode === 'recovery'
-        ? 'Введіть новий пароль для вашого акаунта.'
-        : 'Використовуйте email і пароль, створені під час реєстрації.'
+  const copy = mode === 'forgot'
+    ? 'Вкажіть email, який використовували під час оплати або отримання доступу.'
+    : mode === 'recovery'
+      ? 'Введіть новий пароль для вашого акаунта.'
+      : 'Використовуйте email і пароль, отримані після оплати або від адміністратора.'
 
   return (
     <div className="auth-page">
@@ -108,20 +82,7 @@ function LoginScreen({ initialMode = 'login', onRecoveryComplete }: { initialMod
         <h1>{title}</h1>
         <p className="auth-copy">{copy}</p>
 
-        {(mode === 'login' || mode === 'register') && (
-          <div className="auth-tabs" role="tablist" aria-label="Авторизація">
-            <button type="button" className={mode === 'login' ? 'active' : ''} onClick={() => changeMode('login')}>Вхід</button>
-            <button type="button" className={mode === 'register' ? 'active' : ''} onClick={() => changeMode('register')}>Реєстрація</button>
-          </div>
-        )}
-
         <form className="auth-form" onSubmit={handleSubmit}>
-          {mode === 'register' && (
-            <label>
-              <span>Ім’я</span>
-              <input value={fullName} onChange={(event) => setFullName(event.target.value)} autoComplete="name" required />
-            </label>
-          )}
 
           {mode !== 'recovery' && (
             <label>
@@ -130,14 +91,13 @@ function LoginScreen({ initialMode = 'login', onRecoveryComplete }: { initialMod
             </label>
           )}
 
-          {(mode === 'login' || mode === 'register' || mode === 'recovery') && (
+          {(mode === 'login' || mode === 'recovery') && (
             <label>
               <span>{mode === 'recovery' ? 'Новий пароль' : 'Пароль'}</span>
               <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} minLength={8} required />
             </label>
           )}
-
-          {(mode === 'register' || mode === 'recovery') && (
+          {mode === 'recovery' && (
             <label>
               <span>Повторіть пароль</span>
               <input type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" minLength={8} required />
@@ -147,9 +107,7 @@ function LoginScreen({ initialMode = 'login', onRecoveryComplete }: { initialMod
           <button className="primary auth-submit" type="submit" disabled={loading}>
             {loading
               ? 'Зачекайте…'
-              : mode === 'register'
-                ? 'Створити акаунт'
-                : mode === 'forgot'
+              : mode === 'forgot'
                   ? 'Надіслати посилання'
                   : mode === 'recovery'
                     ? 'Зберегти новий пароль'
@@ -234,7 +192,18 @@ export default function AuthGate() {
   if (recoveryMode) return <LoginScreen initialMode="recovery" onRecoveryComplete={() => setRecoveryMode(false)} />
   if (!session) return <LoginScreen />
   if (error || !profile) return <div className="auth-page"><section className="auth-card"><h1>Не вдалося завантажити профіль</h1><div className="api-warning">{error || 'Профіль не знайдено. Виконайте SQL-налаштування Supabase.'}</div><button className="secondary" onClick={() => supabase.auth.signOut()}>Вийти</button></section></div>
-  if (profile.status !== 'active' && profile.role !== 'admin') return <AccessScreen profile={profile} onSignOut={() => supabase.auth.signOut()} />
+  const accessExpired =
+    profile.role !== 'admin' &&
+    Boolean(profile.access_expires_at) &&
+    new Date(profile.access_expires_at as string).getTime() < Date.now()
+
+  if (accessExpired) {
+    return <AccessScreen profile={{ ...profile, status: 'expired' }} onSignOut={() => supabase.auth.signOut()} />
+  }
+
+  if (profile.status !== 'active' && profile.role !== 'admin') {
+    return <AccessScreen profile={profile} onSignOut={() => supabase.auth.signOut()} />
+  }
 
   return <App userId={session.user.id} profile={profile} onSignOut={() => supabase.auth.signOut()} />
 }
