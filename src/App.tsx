@@ -677,6 +677,7 @@ export default function App({ userId, profile, onSignOut }: { userId: string; pr
   const [selectedId, setSelectedId] = useState<string | null>(savedSearchState?.selectedId ?? null);
   const [channel, setChannel] = useState<Channel>('Email');
   const viewStateKey = `norov-local-ai-active-view:${userId}`;
+  const scrollStateKey = `norov-local-ai-scroll-position:${userId}`;
   const [view, setView] = useState<'search' | 'crm' | 'constructor' | 'guide' | 'admin'>(() => {
     const savedView = localStorage.getItem(viewStateKey);
     return savedView === 'search' || savedView === 'crm' || savedView === 'constructor' || savedView === 'guide' || savedView === 'admin'
@@ -736,6 +737,7 @@ export default function App({ userId, profile, onSignOut }: { userId: string; pr
 
   const detailPanelRef = useRef<HTMLElement | null>(null);
   const leadListRef = useRef<HTMLElement | null>(null);
+  const scrollRestoredRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -776,6 +778,65 @@ export default function App({ userId, profile, onSignOut }: { userId: string; pr
   useEffect(() => {
     localStorage.setItem(viewStateKey, view);
   }, [view, viewStateKey]);
+
+  useEffect(() => {
+    const saved = (() => {
+      try {
+        return JSON.parse(localStorage.getItem(scrollStateKey) || '{}') as Record<string, number>;
+      } catch {
+        return {};
+      }
+    })();
+
+    const restore = () => {
+      const target = Number(saved[view] || 0);
+      window.requestAnimationFrame(() => {
+        window.scrollTo({ top: target, behavior: 'auto' });
+        scrollRestoredRef.current = true;
+      });
+    };
+
+    const save = () => {
+      const current = (() => {
+        try {
+          return JSON.parse(localStorage.getItem(scrollStateKey) || '{}') as Record<string, number>;
+        } catch {
+          return {};
+        }
+      })();
+      current[view] = window.scrollY;
+      localStorage.setItem(scrollStateKey, JSON.stringify(current));
+    };
+
+    const onScroll = () => save();
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') save();
+      if (document.visibilityState === 'visible') {
+        window.requestAnimationFrame(() => {
+          const current = (() => {
+            try {
+              return JSON.parse(localStorage.getItem(scrollStateKey) || '{}') as Record<string, number>;
+            } catch {
+              return {};
+            }
+          })();
+          window.scrollTo({ top: Number(current[view] || 0), behavior: 'auto' });
+        });
+      }
+    };
+
+    restore();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('pagehide', save);
+    document.addEventListener('visibilitychange', onVisibility);
+
+    return () => {
+      save();
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('pagehide', save);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [view, scrollStateKey]);
 
   useEffect(() => {
     localStorage.setItem('norov-local-ai-constructor', JSON.stringify(constructorForm));
@@ -1501,10 +1562,24 @@ export default function App({ userId, profile, onSignOut }: { userId: string; pr
                           </div>
                         </div>
                         <div className="contact-grid">
-                          {selected.email && <a href={`mailto:${selected.email}`}>{selected.email}</a>}
-                          {selected.phone && <a href={`tel:${selected.phone.replace(/\s+/g, '')}`}>{selected.phone}</a>}
-                          {selected.address && <span>{selected.address}</span>}
-                          {!selected.email && !selected.phone && !selected.address && <span>Відкриті контактні дані не знайдено.</span>}
+                          <div className="contact-row">
+                            <span className="contact-label">Email</span>
+                            {selected.email
+                              ? <a href={`mailto:${selected.email}`}>{selected.email}</a>
+                              : <span className="contact-missing">Не знайдено у відкритих даних</span>}
+                          </div>
+                          <div className="contact-row">
+                            <span className="contact-label">Телефон</span>
+                            {selected.phone
+                              ? <a href={`tel:${selected.phone.replace(/\s+/g, '')}`}>{selected.phone}</a>
+                              : <span className="contact-missing">Не знайдено</span>}
+                          </div>
+                          {selected.address && (
+                            <div className="contact-row">
+                              <span className="contact-label">Адреса</span>
+                              <span>{selected.address}</span>
+                            </div>
+                          )}
                         </div>
                         <div className="insight">
                           <strong>Чому варто контактувати</strong>
