@@ -839,7 +839,7 @@ export default function App({ userId, profile, onSignOut }: { userId: string; pr
       window.removeEventListener('pagehide', saveScroll);
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [view, selectedId, visibleCompanies.length, scrollStateKey]);
+  }, [view, selectedId, lastSearchIds?.length, scrollStateKey]);
 
   useEffect(() => {
     localStorage.setItem('norov-local-ai-constructor', JSON.stringify(constructorForm));
