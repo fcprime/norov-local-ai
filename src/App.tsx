@@ -650,6 +650,8 @@ export default function App({ userId, profile, onSignOut }: { userId: string; pr
         lastSearchIds?: string[] | null;
         searchSource?: 'google' | 'geoapify' | 'combined' | 'demo';
         usage?: { searches: number; limit: number } | null;
+        hasMore?: boolean;
+        cursor?: { googlePageToken?: string; geoOffset?: number } | null;
       } | null;
     } catch {
       return null;
@@ -673,6 +675,9 @@ export default function App({ userId, profile, onSignOut }: { userId: string; pr
     }
   });
   const [isSearching, setIsSearching] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(Boolean(savedSearchState?.hasMore));
+  const [searchCursor, setSearchCursor] = useState<{ googlePageToken?: string; geoOffset?: number } | null>(savedSearchState?.cursor ?? null);
   const [hasSearched, setHasSearched] = useState(Boolean(savedSearchState?.hasSearched));
   const [selectedId, setSelectedId] = useState<string | null>(savedSearchState?.selectedId ?? null);
   const [channel, setChannel] = useState<Channel>('Email');
@@ -744,7 +749,7 @@ export default function App({ userId, profile, onSignOut }: { userId: string; pr
     async function loadCloudState() {
       const { data } = await supabase.from('user_state').select('state').eq('user_id', userId).maybeSingle();
       if (cancelled) return;
-      const state = data?.state as { companies?: Company[]; crmIds?: string[]; messageDrafts?: Record<string, string>; search?: { filters?: SearchFilters; hasSearched?: boolean; selectedId?: string | null; lastSearchIds?: string[] | null; searchSource?: 'google' | 'geoapify' | 'combined' | 'demo'; usage?: { searches: number; limit: number } | null } } | undefined;
+      const state = data?.state as { companies?: Company[]; crmIds?: string[]; messageDrafts?: Record<string, string>; search?: { filters?: SearchFilters; hasSearched?: boolean; selectedId?: string | null; lastSearchIds?: string[] | null; searchSource?: 'google' | 'geoapify' | 'combined' | 'demo'; usage?: { searches: number; limit: number } | null; hasMore?: boolean; cursor?: { googlePageToken?: string; geoOffset?: number } | null } } | undefined;
       if (state?.companies) setCompanies(mergeSavedCompanies(state.companies));
       if (state?.crmIds) setCrmIds(state.crmIds);
       if (state?.messageDrafts) setMessageDrafts(state.messageDrafts);
@@ -755,6 +760,8 @@ export default function App({ userId, profile, onSignOut }: { userId: string; pr
         if ('lastSearchIds' in state.search) setLastSearchIds(state.search.lastSearchIds ?? null);
         if (state.search.searchSource) setSearchSource(state.search.searchSource);
         if ('usage' in state.search) setUsage(state.search.usage ?? null);
+        if ('hasMore' in state.search) setHasMore(Boolean(state.search.hasMore));
+        if ('cursor' in state.search) setSearchCursor(state.search.cursor ?? null);
       }
       setCloudReady(true);
     }
@@ -766,37 +773,21 @@ export default function App({ userId, profile, onSignOut }: { userId: string; pr
     localStorage.setItem('norov-local-ai-companies', JSON.stringify(companies));
     localStorage.setItem('norov-local-ai-crm-ids', JSON.stringify(crmIds));
     localStorage.setItem('norov-local-ai-message-drafts', JSON.stringify(messageDrafts));
-    const search = { filters, hasSearched, selectedId, lastSearchIds, searchSource, usage };
+    const search = { filters, hasSearched, selectedId, lastSearchIds, searchSource, usage, hasMore, cursor: searchCursor };
     localStorage.setItem(searchStateKey, JSON.stringify(search));
     if (!cloudReady) return;
     const timer = window.setTimeout(() => {
       supabase.from('user_state').upsert({ user_id: userId, state: { companies, crmIds, messageDrafts, search }, updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
     }, 700);
     return () => window.clearTimeout(timer);
-  }, [companies, crmIds, messageDrafts, filters, hasSearched, selectedId, lastSearchIds, searchSource, usage, cloudReady, userId, searchStateKey]);
+  }, [companies, crmIds, messageDrafts, filters, hasSearched, selectedId, lastSearchIds, searchSource, usage, hasMore, searchCursor, cloudReady, userId, searchStateKey]);
 
   useEffect(() => {
     localStorage.setItem(viewStateKey, view);
   }, [view, viewStateKey]);
 
   useEffect(() => {
-    const saved = (() => {
-      try {
-        return JSON.parse(localStorage.getItem(scrollStateKey) || '{}') as Record<string, number>;
-      } catch {
-        return {};
-      }
-    })();
-
-    const restore = () => {
-      const target = Number(saved[view] || 0);
-      window.requestAnimationFrame(() => {
-        window.scrollTo({ top: target, behavior: 'auto' });
-        scrollRestoredRef.current = true;
-      });
-    };
-
-    const save = () => {
+    const saveScroll = () => {
       const current = (() => {
         try {
           return JSON.parse(localStorage.getItem(scrollStateKey) || '{}') as Record<string, number>;
@@ -808,35 +799,47 @@ export default function App({ userId, profile, onSignOut }: { userId: string; pr
       localStorage.setItem(scrollStateKey, JSON.stringify(current));
     };
 
-    const onScroll = () => save();
-    const onVisibility = () => {
-      if (document.visibilityState === 'hidden') save();
-      if (document.visibilityState === 'visible') {
-        window.requestAnimationFrame(() => {
-          const current = (() => {
-            try {
-              return JSON.parse(localStorage.getItem(scrollStateKey) || '{}') as Record<string, number>;
-            } catch {
-              return {};
-            }
-          })();
-          window.scrollTo({ top: Number(current[view] || 0), behavior: 'auto' });
-        });
+    const restorePosition = () => {
+      if (view === 'search' && selectedId) {
+        const card = document.querySelector<HTMLElement>(`[data-company-id="${CSS.escape(selectedId)}"]`);
+        if (card) {
+          card.scrollIntoView({ behavior: 'auto', block: 'center' });
+          return;
+        }
       }
+      const saved = (() => {
+        try {
+          return JSON.parse(localStorage.getItem(scrollStateKey) || '{}') as Record<string, number>;
+        } catch {
+          return {};
+        }
+      })();
+      window.scrollTo({ top: Number(saved[view] || 0), behavior: 'auto' });
     };
 
-    restore();
-    window.addEventListener('scroll', onScroll, { passive: true });
-    window.addEventListener('pagehide', save);
+    const restoreWithRetry = () => {
+      window.requestAnimationFrame(restorePosition);
+      window.setTimeout(restorePosition, 120);
+      window.setTimeout(restorePosition, 450);
+    };
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') saveScroll();
+      if (document.visibilityState === 'visible') restoreWithRetry();
+    };
+
+    restoreWithRetry();
+    window.addEventListener('scroll', saveScroll, { passive: true });
+    window.addEventListener('pagehide', saveScroll);
     document.addEventListener('visibilitychange', onVisibility);
 
     return () => {
-      save();
-      window.removeEventListener('scroll', onScroll);
-      window.removeEventListener('pagehide', save);
+      saveScroll();
+      window.removeEventListener('scroll', saveScroll);
+      window.removeEventListener('pagehide', saveScroll);
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [view, scrollStateKey]);
+  }, [view, selectedId, visibleCompanies.length, scrollStateKey]);
 
   useEffect(() => {
     localStorage.setItem('norov-local-ai-constructor', JSON.stringify(constructorForm));
@@ -899,6 +902,8 @@ export default function App({ userId, profile, onSignOut }: { userId: string; pr
     setLastSearchIds(null);
     setSearchError('');
     setUsage(null);
+    setHasMore(false);
+    setSearchCursor(null);
     localStorage.removeItem(searchStateKey);
   }
 
@@ -917,6 +922,8 @@ export default function App({ userId, profile, onSignOut }: { userId: string; pr
       const result = await searchCompanies(filters);
       setSearchSource(result.source);
       setUsage(result.usage || null);
+      setHasMore(Boolean(result.hasMore));
+      setSearchCursor(result.cursor ?? null);
       setLastSearchIds(result.companies.map((company) => company.id));
       if (result.companies.length > 0) {
         setCompanies((current) => mergeSavedCompanies([...current, ...result.companies]));
@@ -926,10 +933,37 @@ export default function App({ userId, profile, onSignOut }: { userId: string; pr
       setSearchSource('geoapify');
       setSearchError(error instanceof Error ? error.message : 'Помилка пошуку');
       setLastSearchIds([]);
+      setHasMore(false);
+      setSearchCursor(null);
       setSelectedId(null);
     } finally {
       setHasSearched(true);
       setIsSearching(false);
+    }
+  }
+
+  async function loadMoreCompanies() {
+    if (!searchCursor || isLoadingMore) return;
+    setIsLoadingMore(true);
+    setSearchError('');
+    try {
+      const result = await searchCompanies(filters, searchCursor);
+      setSearchSource(result.source);
+      setUsage(result.usage || usage);
+      setHasMore(Boolean(result.hasMore));
+      setSearchCursor(result.cursor ?? null);
+      const newIds = result.companies.map((company) => company.id);
+      setLastSearchIds((current) => Array.from(new Set([...(current || []), ...newIds])));
+      if (result.companies.length > 0) {
+        setCompanies((current) => mergeSavedCompanies([...current, ...result.companies]));
+      }
+      if (result.companies.length === 0 && !result.hasMore) {
+        setSearchError('Більше нових компаній у цій категорії не знайдено.');
+      }
+    } catch (error) {
+      setSearchError(error instanceof Error ? error.message : 'Не вдалося завантажити більше компаній');
+    } finally {
+      setIsLoadingMore(false);
     }
   }
 
@@ -1496,39 +1530,51 @@ export default function App({ userId, profile, onSignOut }: { userId: string; pr
                         </span>
                       </div>
                     ) : (
-                      visibleCompanies.map((company) => (
-                        <button
-                          key={company.id}
-                          className={`lead-card ${selectedId === company.id ? 'selected' : ''}`}
-                          onClick={() => selectCompany(company.id)}>
-                          <div className="lead-main">
-                            <div>
-                              <strong>{company.name}</strong>
-                              <span>
-                                {company.category} · {company.city}
-                              </span>
-                            </div>
-                            <p>{company.reason}</p>
-                            <div className="tags">
-                              <span>{company.language}</span>
-                              {company.rating > 0 && (
+                      <>
+                        {visibleCompanies.map((company) => (
+                          <button
+                            key={company.id}
+                            data-company-id={company.id}
+                            className={`lead-card ${selectedId === company.id ? 'selected' : ''}`}
+                            onClick={() => selectCompany(company.id)}>
+                            <div className="lead-main">
+                              <div>
+                                <strong>{company.name}</strong>
                                 <span>
-                                  ★ {company.rating} ({company.reviews})
+                                  {company.category} · {company.city}
                                 </span>
-                              )}
-                              <span>
-                                {company.website || company.phone || company.email
-                                  ? 'Є контакти'
-                                  : 'Контакти не знайдено'}
-                              </span>
+                              </div>
+                              <p>{company.reason}</p>
+                              <div className="tags">
+                                <span>{company.language}</span>
+                                {company.rating > 0 && (
+                                  <span>
+                                    ★ {company.rating} ({company.reviews})
+                                  </span>
+                                )}
+                                <span>
+                                  {company.website || company.phone || company.email
+                                    ? 'Є контакти'
+                                    : 'Контакти не знайдено'}
+                                </span>
+                              </div>
                             </div>
-                          </div>
-                          <span
-                            className={`status status-${company.status.toLowerCase().replaceAll(' ', '-')}`}>
-                            {company.status}
-                          </span>
-                        </button>
-                      ))
+                            <span
+                              className={`status status-${company.status.toLowerCase().replaceAll(' ', '-')}`}>
+                              {company.status}
+                            </span>
+                          </button>
+                        ))}
+                        <div className="load-more-wrap">
+                          {hasMore ? (
+                            <button className="load-more-button" onClick={loadMoreCompanies} disabled={isLoadingMore}>
+                              {isLoadingMore ? 'Завантажуємо…' : 'Завантажити ще компанії'}
+                            </button>
+                          ) : (
+                            <span className="load-more-end">Усі доступні компанії для цього запиту завантажено</span>
+                          )}
+                        </div>
+                      </>
                     )}
                   </section>
 

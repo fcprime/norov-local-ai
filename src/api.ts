@@ -11,9 +11,11 @@ export type SearchResponse = {
   localizedTargetBusiness?: string
   location?: { lat: number; lon: number; displayName: string; radiusKm: number }
   usage?: { searches: number; limit: number }
+  hasMore?: boolean
+  cursor?: { googlePageToken?: string; geoOffset?: number } | null
 }
 
-export async function searchCompanies(filters: SearchFilters): Promise<SearchResponse> {
+export async function searchCompanies(filters: SearchFilters, cursor?: SearchResponse['cursor']): Promise<SearchResponse> {
   const { data } = await supabase.auth.getSession()
   const response = await fetch('/api/search', {
     method: 'POST',
@@ -21,7 +23,7 @@ export async function searchCompanies(filters: SearchFilters): Promise<SearchRes
       'Content-Type': 'application/json',
       Authorization: `Bearer ${data.session?.access_token || ''}`,
     },
-    body: JSON.stringify(filters),
+    body: JSON.stringify({ ...filters, ...(cursor ? { cursor } : {}) }),
   })
 
   if (!response.ok) {

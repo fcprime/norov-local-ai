@@ -140,7 +140,7 @@ function mapGooglePlace(place, context) {
   }
 }
 
-async function searchGooglePlaces({ lat, lon, radius, service, targetBusiness, country, city }) {
+async function searchGooglePlaces({ lat, lon, radius, service, targetBusiness, country, city, pageToken = '' }) {
   if (!GOOGLE_PLACES_API_KEY) throw new Error('Не задано GOOGLE_PLACES_API_KEY у змінних середовища.')
   const rule = resolveTarget(targetBusiness)
   const requestBody = {
@@ -149,21 +149,23 @@ async function searchGooglePlaces({ lat, lon, radius, service, targetBusiness, c
     languageCode: languageCodes[country] || 'en',
     regionCode: String(countryCodes[country] || '').toUpperCase(),
   }
+  if (pageToken) requestBody.pageToken = pageToken
   if (Number.isFinite(lat) && Number.isFinite(lon) && Number.isFinite(radius)) {
     requestBody.locationBias = { circle: { center: { latitude: lat, longitude: lon }, radius: Math.min(radius, 50000) } }
   }
   const fieldMask = [
     'places.id', 'places.displayName', 'places.formattedAddress', 'places.location', 'places.primaryType',
     'places.primaryTypeDisplayName', 'places.websiteUri', 'places.nationalPhoneNumber', 'places.internationalPhoneNumber',
-    'places.rating', 'places.userRatingCount', 'places.businessStatus', 'places.googleMapsUri',
+    'places.rating', 'places.userRatingCount', 'places.businessStatus', 'places.googleMapsUri', 'nextPageToken',
   ].join(',')
   const data = await requestJsonPost(`${GOOGLE_PLACES_BASE}/v1/places:searchText`, requestBody, {
     'X-Goog-Api-Key': GOOGLE_PLACES_API_KEY, 'X-Goog-FieldMask': fieldMask,
   })
-  return (data?.places || [])
+  const companies = (data?.places || [])
     .filter((place) => place?.businessStatus !== 'CLOSED_PERMANENTLY')
     .map((place) => mapGooglePlace(place, { service, targetBusiness, targetLabel: rule.label, country, city }))
     .sort((a, b) => [b.website, b.phone].filter(Boolean).length - [a.website, a.phone].filter(Boolean).length || b.reviews - a.reviews || a.name.localeCompare(b.name))
+  return { companies, nextPageToken: String(data?.nextPageToken || '') }
 }
 
 function pick(obj, paths) {
@@ -197,12 +199,23 @@ function mapGeoapifyFeature(feature, context) {
   }
 }
 
-async function searchGeoapifyPlaces({ lat, lon, radius, service, targetBusiness, country, city }) {
-  if (!GEOAPIFY_API_KEY || !Number.isFinite(lat) || !Number.isFinite(lon)) return []
+async function searchGeoapifyPlaces({ lat, lon, radius, service, targetBusiness, country, city, offset = 0 }) {
+  if (!GEOAPIFY_API_KEY || !Number.isFinite(lat) || !Number.isFinite(lon)) return { companies: [], hasMore: false }
   const rule = resolveTarget(targetBusiness)
-  const params = new URLSearchParams({ categories: rule.categories.join(','), filter: `circle:${lon},${lat},${Math.min(radius, 50000)}`, bias: `proximity:${lon},${lat}`, limit: '50', apiKey: GEOAPIFY_API_KEY })
+  const limit = 30
+  const params = new URLSearchParams({
+    categories: rule.categories.join(','),
+    filter: `circle:${lon},${lat},${Math.min(radius, 50000)}`,
+    bias: `proximity:${lon},${lat}`,
+    limit: String(limit),
+    offset: String(Math.max(0, Number(offset || 0))),
+    apiKey: GEOAPIFY_API_KEY,
+  })
   const data = await requestJsonGet(`${GEOAPIFY_BASE}/v2/places?${params}`)
-  return (data?.features || []).map((feature) => mapGeoapifyFeature(feature, { category: rule.label, targetLabel: rule.label, service, targetBusiness, country, city }))
+  const companies = (data?.features || []).map((feature) =>
+    mapGeoapifyFeature(feature, { category: rule.label, targetLabel: rule.label, service, targetBusiness, country, city }),
+  )
+  return { companies, hasMore: companies.length === limit, nextOffset: Math.max(0, Number(offset || 0)) + companies.length }
 }
 
 function canonicalWebsite(value = '') {
@@ -287,6 +300,10 @@ export default async (request) => {
     const country = String(body?.country || '').trim()
     const city = String(body?.city || '').trim()
     const radiusKm = Math.max(1, Math.min(Number(body?.radius || 25), 50))
+    const cursor = body?.cursor && typeof body.cursor === 'object' ? body.cursor : null
+    const googlePageToken = String(cursor?.googlePageToken || '')
+    const geoOffset = Math.max(0, Number(cursor?.geoOffset || 0))
+    const isLoadMore = Boolean(cursor)
     if (!service || !targetBusiness || !country || !city) return json({ error: 'Заповніть вашу послугу, кому продаємо, країну та місто.' }, 400)
 
     const userLogs = await getMonthlyLogs(user.id)
@@ -295,7 +312,7 @@ export default async (request) => {
       return json({ error: `Ви використали місячний ліміт: ${userLimit} пошуків.` }, 429)
     }
 
-    const cacheKey = normalize(`${service}|${targetBusiness}|${country}|${city}|${radiusKm}`)
+    const cacheKey = normalize(`${service}|${targetBusiness}|${country}|${city}|${radiusKm}|${googlePageToken}|${geoOffset}`)
     const cached = cache.get(cacheKey)
     if (cached && Date.now() - cached.createdAt < CACHE_TTL) {
       await insertSearchLog({
@@ -320,12 +337,18 @@ export default async (request) => {
     }
 
     let googleCompanies = []
+    let nextGooglePageToken = ''
     let googleError = ''
     let googleRequestCount = 0
-    if (googleAllowed) {
+    if (googleAllowed && (!isLoadMore || googlePageToken)) {
       googleRequestCount = 1
       try {
-        googleCompanies = await searchGooglePlaces({ lat: location?.lat, lon: location?.lon, radius: radiusKm * 1000, service, targetBusiness, country, city })
+        const googleResult = await searchGooglePlaces({
+          lat: location?.lat, lon: location?.lon, radius: radiusKm * 1000, service, targetBusiness, country, city,
+          pageToken: googlePageToken,
+        })
+        googleCompanies = googleResult.companies
+        nextGooglePageToken = googleResult.nextPageToken
       } catch (error) {
         googleError = error instanceof Error ? error.message : 'Помилка Google Places'
         console.error('Google Places failed:', googleError)
@@ -333,12 +356,22 @@ export default async (request) => {
     }
 
     let geoapifyCompanies = []
+    let geoHasMore = false
+    let nextGeoOffset = geoOffset
     if (GEOAPIFY_API_KEY && location) {
-      try { geoapifyCompanies = await searchGeoapifyPlaces({ ...location, radius: radiusKm * 1000, service, targetBusiness, country, city }) }
-      catch (error) { console.error('Geoapify fallback failed:', error instanceof Error ? error.message : error) }
+      try {
+        const geoResult = await searchGeoapifyPlaces({
+          ...location, radius: radiusKm * 1000, service, targetBusiness, country, city, offset: geoOffset,
+        })
+        geoapifyCompanies = geoResult.companies
+        geoHasMore = geoResult.hasMore
+        nextGeoOffset = geoResult.nextOffset
+      } catch (error) {
+        console.error('Geoapify fallback failed:', error instanceof Error ? error.message : error)
+      }
     }
 
-    const companies = mergeCompanies(googleCompanies, geoapifyCompanies).slice(0, 50)
+    const companies = mergeCompanies(googleCompanies, geoapifyCompanies)
     if (companies.length === 0 && googleError) throw new Error(googleError)
     const source = googleCompanies.length && geoapifyCompanies.length ? 'combined' : googleCompanies.length ? 'google' : 'geoapify'
     const fallbackActive = !googleAllowed
@@ -350,10 +383,13 @@ export default async (request) => {
           ? 'Google API наближається до внутрішнього місячного ліміту. Резервний пошук Geoapify буде активовано автоматично.'
           : googleError ? 'Google Places тимчасово не відповів. Показані резервні дані Geoapify.' : ''
 
+    const hasMore = Boolean(nextGooglePageToken || geoHasMore)
     const payload = {
       companies, source, language: languages[country] || 'English', warning,
       location: location ? { ...location, radiusKm } : { lat: 0, lon: 0, displayName: `${city}, ${country}`, radiusKm },
       usage: { searches: userLogs.length + 1, limit: userLimit },
+      hasMore,
+      cursor: hasMore ? { googlePageToken: nextGooglePageToken, geoOffset: nextGeoOffset } : null,
     }
     cache.set(cacheKey, { createdAt: Date.now(), payload })
     await insertSearchLog({

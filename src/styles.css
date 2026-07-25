@@ -388,3 +388,18 @@ select:invalid{color:#667085}
 .contact-label{font-size:11px;font-weight:800;color:#98a2b3;text-transform:uppercase;letter-spacing:.04em}
 .contact-missing{color:#98a2b3;font-style:italic}
 @media(max-width:640px){.contact-row{grid-template-columns:1fr;gap:3px}}
+
+
+/* Stable desktop details and search pagination */
+.workspace{overflow:visible}
+.lead-list{min-width:0}
+.detail-panel{align-self:start;position:sticky;top:18px}
+.load-more-wrap{display:flex;justify-content:center;padding:20px 0 4px}
+.load-more-button{min-width:230px;border:0;border-radius:12px;padding:13px 20px;background:#6c5ce7;color:#fff;font-weight:800;cursor:pointer;box-shadow:0 8px 20px rgba(92,78,225,.18)}
+.load-more-button:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 11px 24px rgba(92,78,225,.24)}
+.load-more-button:disabled{opacity:.65;cursor:not-allowed}
+.load-more-end{color:#98a2b3;font-size:12px;text-align:center}
+@media(max-width:1100px){
+  .detail-panel{position:static;top:auto}
+  .load-more-button{width:100%}
+}
