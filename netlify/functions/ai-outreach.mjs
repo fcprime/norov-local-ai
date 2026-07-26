@@ -25,7 +25,7 @@ export default async function handler(request) {
     }
     if (!OPENAI_API_KEY) return json({ error: 'OPENAI_API_KEY не налаштований у Netlify.' }, 503)
     const body = await request.json().catch(() => ({}))
-    const form = { service: clean(body.service,300), audience: clean(body.audience,300), problem: clean(body.problem), result: clean(body.result,500), offer: clean(body.offer,500), cta: clean(body.cta,400), proof: clean(body.proof,500), language: ['uk','pl','en'].includes(body.language)?body.language:'uk', tone: ['friendly','direct','expert','soft'].includes(body.tone)?body.tone:'friendly' }
+    const form = { service: clean(body.service,300), audience: clean(body.audience,300), problem: clean(body.problem), result: clean(body.result,500), offer: clean(body.offer,500), cta: clean(body.cta,400), proof: clean(body.proof,500), language: ['uk','pl','en'].includes(body.language)?body.language:'uk', tone: ['friendly','direct','expert','soft'].includes(body.tone)?body.tone:'friendly', variantIndex: Math.max(1, Number(body.variantIndex || 1)), previousPack: body.previousPack && typeof body.previousPack === 'object' ? { subject:clean(body.previousPack.subject,300), main:clean(body.previousPack.main,2200), short:clean(body.previousPack.short,900) } : null }
     if (['service','audience','problem','result','offer','cta'].some((key)=>!form[key])) return json({ error: 'Заповніть усі обов’язкові поля конструктора.' }, 400)
     const prompt = `Ти — senior B2B outreach-маркетолог із 10+ роками досвіду.
 Створи персоналізований пакет холодного B2B-звернення ${languageNames[form.language]}.
@@ -39,6 +39,20 @@ export default async function handler(request) {
 - Перший офер: ${form.offer}
 - Доказ довіри: ${form.proof || 'не вказано'}
 - Заклик або запитання: ${form.cta}
+
+${form.previousPack ? `Це повторна генерація, варіант №${form.variantIndex}.
+Попередній варіант:
+Тема: ${form.previousPack.subject}
+Основне повідомлення: ${form.previousPack.main}
+Коротке повідомлення: ${form.previousPack.short}
+
+Створи СУТТЄВО ІНШИЙ варіант:
+- не повторюй той самий перший абзац;
+- зміни кут подачі та структуру;
+- використай інший природний вступ;
+- по-іншому сформулюй офер і фінальне запитання;
+- не вигадуй жодних нових фактів;
+- не роби лише косметичну заміну кількох слів.` : 'Це перша генерація.'}
 
 Правила:
 1. Не вигадуй фактів, цифр, клієнтів, кейсів або гарантій.

@@ -725,6 +725,8 @@ export default function App({ userId, profile, onSignOut }: { userId: string; pr
     try {
       return JSON.parse(localStorage.getItem('norov-local-ai-constructor-result') || 'null') as {
         pack?: OutreachPack;
+        packs?: OutreachPack[];
+        activeIndex?: number;
         generated?: boolean;
         source?: ConstructorSource;
       } | null;
@@ -732,8 +734,15 @@ export default function App({ userId, profile, onSignOut }: { userId: string; pr
       return null;
     }
   })();
+  const initialPacks = savedConstructorResult?.packs?.length
+    ? savedConstructorResult.packs
+    : savedConstructorResult?.pack
+      ? [savedConstructorResult.pack]
+      : [];
   const [constructorGenerated, setConstructorGenerated] = useState(Boolean(savedConstructorResult?.generated));
-  const [aiPack, setAiPack] = useState<OutreachPack | null>(savedConstructorResult?.pack ?? null);
+  const [aiPacks, setAiPacks] = useState<OutreachPack[]>(initialPacks);
+  const [activeAiIndex, setActiveAiIndex] = useState(Math.min(savedConstructorResult?.activeIndex ?? Math.max(initialPacks.length - 1, 0), Math.max(initialPacks.length - 1, 0)));
+  const aiPack = aiPacks[activeAiIndex] ?? null;
   const [constructorSource, setConstructorSource] = useState<ConstructorSource>(savedConstructorResult?.source ?? null);
   const [aiGenerating, setAiGenerating] = useState(false);
   const [aiError, setAiError] = useState('');
@@ -852,10 +861,12 @@ export default function App({ userId, profile, onSignOut }: { userId: string; pr
     }
     localStorage.setItem('norov-local-ai-constructor-result', JSON.stringify({
       pack: outreachPack,
+      packs: aiPacks,
+      activeIndex: activeAiIndex,
       generated: true,
       source: constructorSource,
     }));
-  }, [constructorGenerated, outreachPack, constructorSource]);
+  }, [constructorGenerated, outreachPack, aiPacks, activeAiIndex, constructorSource]);
 
   const selected = companies.find((company) => company.id === selectedId) ?? null;
 
@@ -877,13 +888,41 @@ export default function App({ userId, profile, onSignOut }: { userId: string; pr
 
   async function createAiOutreach() {
     const required = [constructorForm.service, constructorForm.audience, constructorForm.problem, constructorForm.result, constructorForm.offer, constructorForm.cta];
-    if (required.some((value) => !value.trim())) { setAiError('Заповніть усі обов’язкові поля.'); return; }
-    setAiGenerating(true); setAiError('');
-    try { const response = await generateAiOutreach(constructorForm); setAiPack(response.pack); setConstructorSource('ai'); setConstructorGenerated(true); window.requestAnimationFrame(() => document.querySelector('.constructor-results')?.scrollIntoView({ behavior: 'smooth', block: 'start' })); }
-    catch (error) { setAiError(error instanceof Error ? error.message : 'Не вдалося створити AI-звернення.'); }
-    finally { setAiGenerating(false); }
+    if (required.some((value) => !value.trim())) {
+      setAiError('Заповніть усі обов’язкові поля.');
+      return;
+    }
+    setAiGenerating(true);
+    setAiError('');
+    try {
+      const previousPack = aiPacks.length ? aiPacks[aiPacks.length - 1] : null;
+      const response = await generateAiOutreach({
+        ...constructorForm,
+        previousPack,
+        variantIndex: aiPacks.length + 1,
+      });
+      const nextPacks = [...aiPacks, response.pack].slice(-5);
+      setAiPacks(nextPacks);
+      setActiveAiIndex(nextPacks.length - 1);
+      setConstructorSource('ai');
+      setConstructorGenerated(true);
+      window.requestAnimationFrame(() =>
+        document.querySelector('.constructor-results')?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+      );
+    } catch (error) {
+      setAiError(error instanceof Error ? error.message : 'Не вдалося створити AI-звернення.');
+    } finally {
+      setAiGenerating(false);
+    }
   }
-  function createTemplateOutreach() { setAiPack(null); setConstructorSource('template'); setAiError(''); setConstructorGenerated(true); }
+
+  function createTemplateOutreach() {
+    setAiPacks([]);
+    setActiveAiIndex(0);
+    setConstructorSource('template');
+    setAiError('');
+    setConstructorGenerated(true);
+  }
 
   function selectCompany(id: string) {
     setSelectedId(id);
@@ -1354,7 +1393,8 @@ export default function App({ userId, profile, onSignOut }: { userId: string; pr
                       if (!window.confirm('Очистити бриф і згенеровані тексти?')) return;
                       setConstructorForm(emptyConstructorForm);
                       setConstructorGenerated(false);
-                      setAiPack(null);
+                      setAiPacks([]);
+                      setActiveAiIndex(0);
                       setConstructorSource(null);
                       setAiError('');
                       localStorage.removeItem('norov-local-ai-constructor-result');
@@ -1363,7 +1403,7 @@ export default function App({ userId, profile, onSignOut }: { userId: string; pr
                   </button>
                   <button className="constructor-template" onClick={createTemplateOutreach} disabled={aiGenerating}>Створити без AI</button>
                   <button className="constructor-ai" onClick={createAiOutreach} disabled={aiGenerating}>
-                    {aiGenerating ? 'AI генерує…' : '✦ Згенерувати через AI'}
+                    {aiGenerating ? 'AI генерує…' : aiPacks.length ? '✦ Згенерувати інший варіант' : '✦ Згенерувати через AI'}
                   </button>
                 </div>
               </section>
@@ -1373,8 +1413,23 @@ export default function App({ userId, profile, onSignOut }: { userId: string; pr
                   <div className="constructor-placeholder"><span>✦</span><strong>Заповніть бриф і натисніть «Згенерувати через AI»</strong><p>Тут з’являться тема для email, основне повідомлення та коротка версія.</p></div>
                 ) : (
                   <>
-                    <div className={`constructor-source ${constructorSource === 'ai' ? 'ai' : 'template'}`}>
-                      {constructorSource === 'ai' ? '✦ Згенеровано за допомогою AI' : 'Шаблонний режим без AI'}
+                    <div className="constructor-results-head">
+                      <div className={`constructor-source ${constructorSource === 'ai' ? 'ai' : 'template'}`}>
+                        {constructorSource === 'ai' ? '✦ Згенеровано за допомогою AI' : 'Шаблонний режим без AI'}
+                      </div>
+                      {constructorSource === 'ai' && aiPacks.length > 1 && (
+                        <div className="variant-switcher" aria-label="Варіанти AI-тексту">
+                          {aiPacks.map((_, index) => (
+                            <button
+                              key={index}
+                              type="button"
+                              className={activeAiIndex === index ? 'active' : ''}
+                              onClick={() => setActiveAiIndex(index)}>
+                              Варіант {index + 1}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
                     {[
                       ['Тема для email', outreachPack.subject],

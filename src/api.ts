@@ -35,7 +35,7 @@ export async function searchCompanies(filters: SearchFilters, cursor?: SearchRes
 }
 
 
-export type OutreachFormPayload = { service:string; audience:string; problem:string; result:string; offer:string; cta:string; proof:string; language:'uk'|'pl'|'en'; tone:'direct'|'friendly'|'expert'|'soft' }
+export type OutreachFormPayload = { service:string; audience:string; problem:string; result:string; offer:string; cta:string; proof:string; language:'uk'|'pl'|'en'; tone:'direct'|'friendly'|'expert'|'soft'; previousPack?:OutreachPack | null; variantIndex?:number }
 export type OutreachPack = { subject:string; main:string; short:string }
 export async function generateAiOutreach(form: OutreachFormPayload): Promise<{ pack:OutreachPack; model?:string }> {
   const { data } = await supabase.auth.getSession()

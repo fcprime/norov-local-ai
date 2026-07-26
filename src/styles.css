@@ -476,3 +476,16 @@ select:invalid{color:#667085}
     overflow: visible;
   }
 }
+
+
+/* AI outreach variants */
+.constructor-results-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.variant-switcher{display:flex;gap:7px;flex-wrap:wrap}
+.variant-switcher button{border:1px solid #d0d5dd;background:#fff;color:#475467;border-radius:999px;padding:7px 10px;font-size:11px;font-weight:800;cursor:pointer}
+.variant-switcher button:hover{border-color:#8b7cf6;color:#5d4de0}
+.variant-switcher button.active{border-color:#6c5ce7;background:#6c5ce7;color:#fff}
+@media(max-width:640px){
+  .constructor-results-head{align-items:stretch}
+  .variant-switcher{width:100%;overflow-x:auto;flex-wrap:nowrap;padding-bottom:3px}
+  .variant-switcher button{flex:0 0 auto}
+}
