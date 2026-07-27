@@ -44,3 +44,25 @@ export async function generateAiOutreach(form: OutreachFormPayload): Promise<{ p
   if (!response.ok) throw new Error(body.error || 'Не вдалося створити AI-звернення')
   return body
 }
+
+
+export type ContactEnrichmentResponse = {
+  email?: string
+  facebook?: string
+  instagram?: string
+}
+
+export async function enrichCompanyContact(website: string): Promise<ContactEnrichmentResponse> {
+  const { data } = await supabase.auth.getSession()
+  const response = await fetch('/api/enrich-contact', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${data.session?.access_token || ''}`,
+    },
+    body: JSON.stringify({ website }),
+  })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(body.error || 'Не вдалося перевірити сайт компанії')
+  return body
+}

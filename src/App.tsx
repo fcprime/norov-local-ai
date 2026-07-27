@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { companies as initialCompanies } from './mockData';
-import { generateAiOutreach, searchCompanies, type OutreachPack } from './api';
+import { enrichCompanyContact, generateAiOutreach, searchCompanies, type OutreachPack } from './api';
 import AdminPanel from './AdminPanel';
 import { supabase, type Profile } from './supabase';
 import type { Channel, Company, LeadActivity, LeadStatus, SearchFilters } from './types';
@@ -573,6 +573,18 @@ function shortenMessage(value: string) {
     : [parts[0], parts[1], parts.at(-1)].filter(Boolean).join('\n\n');
 }
 
+function normalizeWhatsAppNumber(value: string) {
+  return value.replace(/\D/g, '');
+}
+
+function buildWhatsAppUrl(phone: string, message: string) {
+  const number = normalizeWhatsAppNumber(phone);
+  if (number.length < 8) return '';
+  return `https://wa.me/${number}?text=${encodeURIComponent(message)}`;
+}
+
+type ContactFilter = 'all' | 'email' | 'whatsapp';
+
 
 type ConstructorLanguage = 'uk' | 'pl' | 'en';
 type ConstructorTone = 'direct' | 'friendly' | 'expert' | 'soft';
@@ -681,6 +693,9 @@ export default function App({ userId, profile, onSignOut }: { userId: string; pr
   const [hasSearched, setHasSearched] = useState(Boolean(savedSearchState?.hasSearched));
   const [selectedId, setSelectedId] = useState<string | null>(savedSearchState?.selectedId ?? null);
   const [channel, setChannel] = useState<Channel>('Email');
+  const [contactFilter, setContactFilter] = useState<ContactFilter>('all');
+  const [emailLookupId, setEmailLookupId] = useState<string | null>(null);
+  const [emailLookupMessage, setEmailLookupMessage] = useState('');
   const viewStateKey = `norov-local-ai-active-view:${userId}`;
   const scrollStateKey = `norov-local-ai-scroll-position:${userId}`;
   const [view, setView] = useState<'search' | 'crm' | 'constructor' | 'guide' | 'admin'>(() => {
@@ -886,6 +901,18 @@ export default function App({ userId, profile, onSignOut }: { userId: string; pr
     );
   }, [companies, filters.country, filters.city, hasSearched, lastSearchIds]);
 
+  const filteredVisibleCompanies = useMemo(() => {
+    if (contactFilter === 'email') return visibleCompanies.filter((company) => Boolean(company.email));
+    if (contactFilter === 'whatsapp') return visibleCompanies.filter((company) => Boolean(normalizeWhatsAppNumber(company.phone)));
+    return visibleCompanies;
+  }, [visibleCompanies, contactFilter]);
+
+  const contactCounts = useMemo(() => ({
+    all: visibleCompanies.length,
+    email: visibleCompanies.filter((company) => Boolean(company.email)).length,
+    whatsapp: visibleCompanies.filter((company) => Boolean(normalizeWhatsAppNumber(company.phone))).length,
+  }), [visibleCompanies]);
+
   async function createAiOutreach() {
     const required = [constructorForm.service, constructorForm.audience, constructorForm.problem, constructorForm.result, constructorForm.offer, constructorForm.cta];
     if (required.some((value) => !value.trim())) {
@@ -922,6 +949,30 @@ export default function App({ userId, profile, onSignOut }: { userId: string; pr
     setConstructorSource('template');
     setAiError('');
     setConstructorGenerated(true);
+  }
+
+  async function findCompanyEmail(company: Company) {
+    if (!company.website) {
+      setEmailLookupMessage('У компанії немає сайту для перевірки.');
+      return;
+    }
+    setEmailLookupId(company.id);
+    setEmailLookupMessage('');
+    try {
+      const result = await enrichCompanyContact(company.website);
+      updateCompany(company.id, {
+        email: company.email || result.email || '',
+        facebook: company.facebook || result.facebook || '',
+        instagram: company.instagram || result.instagram || '',
+      });
+      setEmailLookupMessage(result.email
+        ? `Email знайдено: ${result.email}`
+        : 'Email на сайті та сторінках контактів не знайдено.');
+    } catch (error) {
+      setEmailLookupMessage(error instanceof Error ? error.message : 'Не вдалося перевірити сайт.');
+    } finally {
+      setEmailLookupId(null);
+    }
   }
 
   function selectCompany(id: string) {
@@ -1572,11 +1623,22 @@ export default function App({ userId, profile, onSignOut }: { userId: string; pr
                         <h2>Компанії у вибраному сегменті</h2>
                       </div>
                       <div className="section-title-actions">
-                        <span>{visibleCompanies.length} результатів</span>
+                        <span>{filteredVisibleCompanies.length} із {visibleCompanies.length} результатів</span>
                         <button className="secondary compact" onClick={resetSearch}>Новий пошук</button>
                       </div>
                     </div>
-                    {visibleCompanies.length === 0 ? (
+                    <div className="contact-filter-tabs" aria-label="Фільтр за контактами">
+                      <button className={contactFilter === 'all' ? 'active' : ''} onClick={() => setContactFilter('all')}>
+                        Усі <span>{contactCounts.all}</span>
+                      </button>
+                      <button className={contactFilter === 'email' ? 'active' : ''} onClick={() => setContactFilter('email')}>
+                        Є email <span>{contactCounts.email}</span>
+                      </button>
+                      <button className={contactFilter === 'whatsapp' ? 'active' : ''} onClick={() => setContactFilter('whatsapp')}>
+                        Є телефон / WhatsApp <span>{contactCounts.whatsapp}</span>
+                      </button>
+                    </div>
+                    {filteredVisibleCompanies.length === 0 ? (
                       <div className="empty-state">
                         <strong>Нічого не знайдено</strong>
                         <span>
@@ -1586,7 +1648,7 @@ export default function App({ userId, profile, onSignOut }: { userId: string; pr
                       </div>
                     ) : (
                       <>
-                        {visibleCompanies.map((company) => (
+                        {filteredVisibleCompanies.map((company) => (
                           <button
                             key={company.id}
                             data-company-id={company.id}
@@ -1665,15 +1727,41 @@ export default function App({ userId, profile, onSignOut }: { userId: string; pr
                         <div className="contact-grid">
                           <div className="contact-row">
                             <span className="contact-label">Email</span>
-                            {selected.email
-                              ? <a href={`mailto:${selected.email}`}>{selected.email}</a>
-                              : <span className="contact-missing">Не знайдено у відкритих даних</span>}
+                            <div className="contact-value-actions">
+                              {selected.email
+                                ? <a href={`mailto:${selected.email}`}>{selected.email}</a>
+                                : <span className="contact-missing">Не знайдено у відкритих даних</span>}
+                              {!selected.email && selected.website && (
+                                <button
+                                  type="button"
+                                  className="contact-mini-action"
+                                  onClick={() => findCompanyEmail(selected)}
+                                  disabled={emailLookupId === selected.id}>
+                                  {emailLookupId === selected.id ? 'Шукаємо…' : 'Знайти email на сайті'}
+                                </button>
+                              )}
+                            </div>
                           </div>
                           <div className="contact-row">
                             <span className="contact-label">Телефон</span>
-                            {selected.phone
-                              ? <a href={`tel:${selected.phone.replace(/\s+/g, '')}`}>{selected.phone}</a>
-                              : <span className="contact-missing">Не знайдено</span>}
+                            <div className="contact-value-actions">
+                              {selected.phone
+                                ? <a href={`tel:${selected.phone.replace(/\s+/g, '')}`}>{selected.phone}</a>
+                                : <span className="contact-missing">Не знайдено</span>}
+                              {selected.phone && (
+                                <a
+                                  className="whatsapp-action"
+                                  href={buildWhatsAppUrl(
+                                    selected.phone,
+                                    messageDrafts[`${selected.id}:WhatsApp`] ||
+                                      buildMessage(selected, 'WhatsApp', filters.service, filters.targetBusiness, messageStyle),
+                                  )}
+                                  target="_blank"
+                                  rel="noreferrer">
+                                  Написати у WhatsApp ↗
+                                </a>
+                              )}
+                            </div>
                           </div>
                           {selected.address && (
                             <div className="contact-row">
@@ -1682,6 +1770,7 @@ export default function App({ userId, profile, onSignOut }: { userId: string; pr
                             </div>
                           )}
                         </div>
+                        {emailLookupMessage && <div className="contact-lookup-message">{emailLookupMessage}</div>}
                         <div className="insight">
                           <strong>Чому варто контактувати</strong>
                           <p>{selected.reason}</p>
