@@ -38,11 +38,56 @@ async function safeUrl(value) {
 }
 
 function cleanEmail(value) {
-  const email = String(value || '').trim().toLowerCase()
+  const email = String(value || '')
+    .trim()
+    .replace(/[),.;:]+$/g, '')
+    .toLowerCase()
+
   if (!email || email.length > 254) return ''
+  if (!EMAIL_RE.test(email)) return ''
+  EMAIL_RE.lastIndex = 0
   if (/\.(png|jpg|jpeg|gif|webp|svg)$/i.test(email)) return ''
-  if (/^(example|test|name|email)@/i.test(email)) return ''
+  if (isPlaceholderEmail(email)) return ''
   return email
+}
+
+const PLACEHOLDER_DOMAINS = new Set([
+  'example.com',
+  'example.org',
+  'example.net',
+  'test.com',
+  'email.com',
+  'domain.com',
+  'yourdomain.com',
+  'company.com',
+  'sample.com',
+])
+
+function isPlaceholderEmail(email) {
+  const [local = '', domain = ''] = String(email || '').toLowerCase().split('@')
+  if (!local || !domain) return true
+  if (PLACEHOLDER_DOMAINS.has(domain)) return true
+  if (/^(example|test|name|email|yourname|user|username)$/i.test(local)) return true
+  if (/^(info|contact|kontakt|hello|mail|office)@(example|test|domain)\./i.test(email)) return true
+  return false
+}
+
+function registrableDomain(hostname) {
+  const host = String(hostname || '').toLowerCase().replace(/^www\./, '')
+  const parts = host.split('.').filter(Boolean)
+  return parts.length <= 2 ? host : parts.slice(-2).join('.')
+}
+
+function emailScore(email, websiteDomain) {
+  const [local = '', domain = ''] = email.split('@')
+  let score = 100
+
+  if (registrableDomain(domain) === registrableDomain(websiteDomain)) score -= 60
+  if (/^(info|contact|kontakt|office|hello|sales|booking|reception|sekretariat|biuro|recepcja)$/i.test(local)) score -= 25
+  if (/^(noreply|no-reply|donotreply|do-not-reply)$/i.test(local)) score += 100
+  if (/gmail\.com$|outlook\.com$|hotmail\.com$|yahoo\.com$/i.test(domain)) score += 20
+
+  return score
 }
 
 function extract(html, baseUrl) {
@@ -121,12 +166,17 @@ export default async function handler(request) {
       instagram ||= data.instagram
     }
 
-    const preferred = [...emails].sort((a, b) => {
-      const score = (email) => /^(info|contact|kontakt|office|hello|sales|booking|reception)@/i.test(email) ? 0 : 1
-      return score(a) - score(b)
-    })[0] || ''
+    const websiteDomain = url.hostname
+    const validEmails = [...emails].filter((email) => !isPlaceholderEmail(email))
+    const preferred = validEmails
+      .sort((a, b) => emailScore(a, websiteDomain) - emailScore(b, websiteDomain))[0] || ''
 
-    return json({ email: preferred, facebook, instagram })
+    return json({
+      email: preferred,
+      emails: validEmails,
+      facebook,
+      instagram,
+    })
   } catch (error) {
     console.error('Contact enrichment error:', error)
     return json({ error: error?.message || 'Не вдалося перевірити сайт.' }, error?.status || 500)
