@@ -696,6 +696,14 @@ export default function App({ userId, profile, onSignOut }: { userId: string; pr
   const [contactFilter, setContactFilter] = useState<ContactFilter>('all');
   const [emailLookupId, setEmailLookupId] = useState<string | null>(null);
   const [emailLookupMessage, setEmailLookupMessage] = useState('');
+  const emailEnrichmentKey = `norov-local-ai-email-enrichment:${userId}`;
+  const [emailCheckedIds, setEmailCheckedIds] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem(`norov-local-ai-email-enrichment:${userId}`) || '[]');
+    } catch {
+      return [];
+    }
+  });
   const viewStateKey = `norov-local-ai-active-view:${userId}`;
   const scrollStateKey = `norov-local-ai-scroll-position:${userId}`;
   const [view, setView] = useState<'search' | 'crm' | 'constructor' | 'guide' | 'admin'>(() => {
@@ -811,6 +819,10 @@ export default function App({ userId, profile, onSignOut }: { userId: string; pr
   }, [view, viewStateKey]);
 
   useEffect(() => {
+    localStorage.setItem(emailEnrichmentKey, JSON.stringify(emailCheckedIds));
+  }, [emailCheckedIds, emailEnrichmentKey]);
+
+  useEffect(() => {
     const saveScroll = () => {
       const current = (() => {
         try {
@@ -886,6 +898,18 @@ export default function App({ userId, profile, onSignOut }: { userId: string; pr
   const selected = companies.find((company) => company.id === selectedId) ?? null;
 
   useEffect(() => {
+    if (
+      !selected ||
+      selected.email ||
+      !selected.website ||
+      emailLookupId === selected.id ||
+      emailCheckedIds.includes(selected.id)
+    ) return;
+
+    void findCompanyEmail(selected, true);
+  }, [selected?.id, selected?.email, selected?.website, emailLookupId, emailCheckedIds]);
+
+  useEffect(() => {
     if (!selectedId || lastSearchIds === null) return;
     if (!lastSearchIds.includes(selectedId)) setSelectedId(null);
   }, [selectedId, lastSearchIds]);
@@ -951,13 +975,15 @@ export default function App({ userId, profile, onSignOut }: { userId: string; pr
     setConstructorGenerated(true);
   }
 
-  async function findCompanyEmail(company: Company) {
+  async function findCompanyEmail(company: Company, automatic = false) {
     if (!company.website) {
-      setEmailLookupMessage('У компанії немає сайту для перевірки.');
+      if (!automatic) setEmailLookupMessage('У компанії немає сайту для перевірки.');
       return;
     }
+    if (emailLookupId === company.id) return;
+
     setEmailLookupId(company.id);
-    setEmailLookupMessage('');
+    setEmailLookupMessage(automatic ? 'Автоматично шукаємо email на сайті…' : 'Повторно перевіряємо сайт…');
     try {
       const result = await enrichCompanyContact(company.website);
       updateCompany(company.id, {
@@ -965,10 +991,16 @@ export default function App({ userId, profile, onSignOut }: { userId: string; pr
         facebook: company.facebook || result.facebook || '',
         instagram: company.instagram || result.instagram || '',
       });
+      setEmailCheckedIds((current) =>
+        current.includes(company.id) ? current : [...current, company.id],
+      );
       setEmailLookupMessage(result.email
         ? `Email знайдено: ${result.email}`
         : 'Email на сайті та сторінках контактів не знайдено.');
     } catch (error) {
+      setEmailCheckedIds((current) =>
+        current.includes(company.id) ? current : [...current, company.id],
+      );
       setEmailLookupMessage(error instanceof Error ? error.message : 'Не вдалося перевірити сайт.');
     } finally {
       setEmailLookupId(null);
@@ -1731,15 +1763,23 @@ export default function App({ userId, profile, onSignOut }: { userId: string; pr
                               {selected.email
                                 ? <a href={`mailto:${selected.email}`}>{selected.email}</a>
                                 : <span className="contact-missing">Не знайдено у відкритих даних</span>}
-                              {!selected.email && selected.website && (
-                                <button
-                                  type="button"
-                                  className="contact-mini-action"
-                                  onClick={() => findCompanyEmail(selected)}
-                                  disabled={emailLookupId === selected.id}>
-                                  {emailLookupId === selected.id ? 'Шукаємо…' : 'Знайти email на сайті'}
-                                </button>
+                              {!selected.email && selected.website && emailLookupId === selected.id && (
+                                <span className="email-auto-status">
+                                  <span className="email-auto-spinner" aria-hidden="true" />
+                                  Шукаємо email…
+                                </span>
                               )}
+                              {!selected.email &&
+                                selected.website &&
+                                emailLookupId !== selected.id &&
+                                emailCheckedIds.includes(selected.id) && (
+                                  <button
+                                    type="button"
+                                    className="contact-mini-action"
+                                    onClick={() => findCompanyEmail(selected, false)}>
+                                    Перевірити ще раз
+                                  </button>
+                                )}
                             </div>
                           </div>
                           <div className="contact-row">

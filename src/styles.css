@@ -506,3 +506,23 @@ select:invalid{color:#667085}
   .contact-filter-tabs button{width:100%}
   .contact-value-actions{align-items:flex-start;flex-direction:column}
 }
+
+
+/* Automatic email enrichment after selecting a company */
+.email-auto-status{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  color:#667085;
+  font-size:12px;
+  font-weight:700;
+}
+.email-auto-spinner{
+  width:14px;
+  height:14px;
+  border:2px solid #d9d6fe;
+  border-top-color:#6c5ce7;
+  border-radius:50%;
+  animation:emailAutoSpin .8s linear infinite;
+}
+@keyframes emailAutoSpin{to{transform:rotate(360deg)}}
